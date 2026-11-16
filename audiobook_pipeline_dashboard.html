@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audiobook Pipeline Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @keyframes pulse-fast {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.95); }
+        }
+        .animate-pulse-fast {
+            animation: pulse-fast 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen flex flex-col">
+
+    <!-- Top Navigation Header -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-100">
+                    <i class="fa-solid fa-headphones-simple text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-slate-900 leading-tight">Audiobook Pipeline Manager</h1>
+                    <p class="text-xs text-slate-500 font-medium">Local Folder Watcher & Local TTS Engine</p>
+                </div>
+            </div>
+
+            <!-- Global Status & Quick Controls -->
+            <div class="flex items-center space-x-4">
+                <div id="watcher-badge" class="flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold">
+                    <span id="watcher-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-fast"></span>
+                    <span id="watcher-text">Watcher Active</span>
+                </div>
+                
+                <button id="toggle-watcher-btn" onclick="toggleWatcher()" class="text-xs px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-medium text-slate-700 transition shadow-sm flex items-center space-x-1.5">
+                    <i id="toggle-icon" class="fa-solid fa-pause text-slate-500"></i>
+                    <span id="toggle-text">Pause Watcher</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-6">
+
+        <!-- Banner / Path Alert -->
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="p-2.5 bg-slate-100 rounded-xl text-slate-600">
+                    <i class="fa-regular fa-folder-open text-lg"></i>
+                </div>
+                <div>
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Monitored Inbox</span>
+                    <p id="inbox-path-label" class="text-sm font-mono font-medium text-slate-800 bg-slate-100 px-2 py-0.5 rounded mt-0.5 inline-block">C:\AudiobookInbox</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-3 w-full sm:w-auto justify-end">
+                <span class="text-xs text-slate-400">Drop files directly (.epub, .pdf, .mobi, .azw3, .fb2, .docx, .txt)</span>
+            </div>
+        </div>
+
+        <!-- Metric Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <!-- Card 1: Execution Status -->
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm relative overflow-hidden">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Current Status</span>
+                    <span id="status-icon-bg" class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <i id="status-icon" class="fa-solid fa-arrows-spin"></i>
+                    </span>
+                </div>
+                <div class="mt-3">
+                    <p id="current-status-title" class="text-lg font-bold text-slate-900 truncate">Idle / Listening</p>
+                    <p id="current-status-desc" class="text-xs text-slate-500 mt-1 truncate">Ready for new files</p>
+                </div>
+            </div>
+
+            <!-- Card 2: Completed Conversions -->
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Completed Titles</span>
+                    <span class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </span>
+                </div>
+                <div class="mt-3">
+                    <p id="metric-completed" class="text-2xl font-bold text-slate-900">0</p>
+                    <p class="text-xs text-emerald-600 font-medium mt-1 flex items-center">
+                        <i class="fa-solid fa-arrow-up text-[10px] mr-1"></i> Live count
+                    </p>
+                </div>
+            </div>
+
+            <!-- Card 3: Storage Used -->
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Audio Storage</span>
+                    <span class="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <i class="fa-solid fa-hard-drive"></i>
+                    </span>
+                </div>
+                <div class="mt-3">
+                    <p id="metric-storage" class="text-2xl font-bold text-slate-900">0 GB</p>
+                    <p class="text-xs text-slate-500 mt-1">Cloud destination storage</p>
+                </div>
+            </div>
+
+            <!-- Card 4: Active Queue -->
+            <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-sm">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">In Queue & Active</span>
+                    <span class="w-8 h-8 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                        <i class="fa-solid fa-list-check"></i>
+                    </span>
+                </div>
+                <div class="mt-3">
+                    <p id="metric-queue" class="text-2xl font-bold text-slate-900">0</p>
+                    <p class="text-xs text-amber-600 font-medium mt-1">Pending & running jobs</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Two Column Layout for Table and Disk Visualizer -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Left Column: Queue & History Table (2 cols) -->
+            <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200/80 shadow-sm flex flex-col overflow-hidden">
+                
+                <!-- Table Header & Filters -->
+                <div class="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                        <h2 class="font-bold text-slate-900 text-base">Conversion Queue & Activity</h2>
+                        <p class="text-xs text-slate-500">Live feed of processed files and automated audio output</p>
+                    </div>
+
+                    <!-- Filter Buttons -->
+                    <div class="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl text-xs font-medium self-start sm:self-auto flex-wrap gap-y-1">
+                        <button onclick="setFilter('all')" id="filter-all" class="px-3 py-1.5 rounded-lg bg-white text-slate-800 shadow-sm">All</button>
+                        <button onclick="setFilter('queued')" id="filter-queued" class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900">Queued</button>
+                        <button onclick="setFilter('active')" id="filter-active" class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900">Active</button>
+                        <button onclick="setFilter('completed')" id="filter-completed" class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900">Completed</button>
+                        <button onclick="setFilter('failed')" id="filter-failed" class="px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900">Failed</button>
+                    </div>
+                </div>
+
+                <!-- Table Content -->
+                <div class="overflow-x-auto flex-1">
+                    <table class="w-full text-left text-xs text-slate-600">
+                        <thead class="bg-slate-50/70 text-slate-500 font-semibold border-b border-slate-100">
+                            <tr>
+                                <th class="py-3 px-4">Title & Format</th>
+                                <th class="py-3 px-4">Status & Progress</th>
+                                <th class="py-3 px-4">Engine</th>
+                                <th class="py-3 px-4">Output Size</th>
+                                <th class="py-3 px-4 text-right">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jobs-table-body" class="divide-y divide-slate-100">
+                            <!-- Rows injected via live API -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right Column: Disk Visualizer & System Stats (1 col) -->
+            <div class="space-y-6">
+                <!-- Disk Usage Card -->
+                <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-4">
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-bold text-slate-900 text-base">Disk Space Allocation</h2>
+                        <span class="text-xs font-medium text-slate-400">Cloud Drive</span>
+                    </div>
+
+                    <div class="space-y-2">
+                        <div class="grid grid-cols-1 gap-2 text-xs pt-2">
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-500">Used Space:</span>
+                                <span id="disk-output-text" class="font-semibold text-slate-800">0 GB</span>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-slate-500">Free Drive Space:</span>
+                                <span id="disk-free-text" class="font-semibold text-slate-800">0 GB</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Text Cleaning & Noise Filter Settings Summary -->
+                <div class="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-sm space-y-3">
+                    <h2 class="font-bold text-slate-900 text-sm flex items-center space-x-2">
+                        <i class="fa-solid fa-filter text-indigo-500"></i>
+                        <span>Active Noise Filters</span>
+                    </h2>
+                    <ul class="text-xs space-y-2 text-slate-600">
+                        <li class="flex items-center justify-between">
+                            <span>Spurious "m13" Separators</span>
+                            <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-semibold">Filtered</span>
+                        </li>
+                        <li class="flex items-center justify-between">
+                            <span>Standalone Page Numbers</span>
+                            <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-semibold">Stripped</span>
+                        </li>
+                        <li class="flex items-center justify-between">
+                            <span>Copyright & ISBN Blocks</span>
+                            <span class="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-semibold">Stripped</span>
+                        </li>
+                        <li class="flex items-center justify-between">
+                            <span>Engine Preferred</span>
+                            <span class="px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-semibold">Kokoro-82M</span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Simple Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+        Local Audiobook Automation Pipeline &bull; Watching folder in real-time
+    </footer>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        let watcherActive = true;
+        let currentFilter = 'all';
+
+        // Toggle Watcher State via API
+        async function toggleWatcher() {
+            try {
+                const res = await fetch('/api/toggle-watcher', { method: 'POST' });
+                const data = await res.json();
+                watcherActive = !data.is_paused;
+                updateWatcherUI(watcherActive);
+            } catch (err) {
+                console.error("Failed to toggle watcher:", err);
+            }
+        }
+
+        // Cancel Active Job
+        async function cancelJob(jobId) {
+            try {
+                await fetch(`/api/cancel/${jobId}`, { method: 'POST' });
+                await fetchPipelineStatus();
+            } catch (err) {
+                console.error("Failed to cancel job:", err);
+            }
+        }
+
+        function updateWatcherUI(isActive) {
+            const badge = document.getElementById('watcher-badge');
+            const dot = document.getElementById('watcher-dot');
+            const text = document.getElementById('watcher-text');
+            const toggleIcon = document.getElementById('toggle-icon');
+            const toggleText = document.getElementById('toggle-text');
+
+            if (isActive) {
+                badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-semibold";
+                dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse-fast";
+                text.textContent = "Watcher Active";
+                toggleIcon.className = "fa-solid fa-pause text-slate-500";
+                toggleText.textContent = "Pause Watcher";
+            } else {
+                badge.className = "flex items-center space-x-2 px-3 py-1.5 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-xs font-semibold";
+                dot.className = "w-2 h-2 rounded-full bg-amber-500";
+                text.textContent = "Watcher Paused";
+                toggleIcon.className = "fa-solid fa-play text-slate-500";
+                toggleText.textContent = "Resume Watcher";
+            }
+        }
+
+        // Filter Jobs Table
+        function setFilter(filter) {
+            currentFilter = filter;
+            ['all', 'queued', 'active', 'completed', 'failed'].forEach(f => {
+                const btn = document.getElementById(`filter-${f}`);
+                if (btn) {
+                    btn.className = (f === filter) 
+                        ? "px-3 py-1.5 rounded-lg bg-white text-slate-800 shadow-sm font-semibold" 
+                        : "px-3 py-1.5 rounded-lg text-slate-600 hover:text-slate-900";
+                }
+            });
+            fetchPipelineStatus();
+        }
+
+        // Fetch Live State from FastAPI Backend
+        async function fetchPipelineStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+
+                // Update Watcher Sync State
+                watcherActive = !data.is_paused;
+                updateWatcherUI(watcherActive);
+
+                // Update Top Metric Cards
+                document.getElementById('metric-completed').textContent = data.total_converted;
+                const totalQueueCount = (data.pending || []).length + (data.active || []).length;
+                document.getElementById('metric-queue').textContent = totalQueueCount;
+                document.getElementById('disk-free-text').textContent = data.disk.free_gb + ' GB';
+                document.getElementById('disk-output-text').textContent = data.disk.used_gb + ' GB';
+                document.getElementById('metric-storage').textContent = data.disk.used_gb + ' GB';
+                
+                const inboxLabel = document.getElementById('inbox-path-label');
+                if (inboxLabel) inboxLabel.textContent = data.inbox_path;
+
+                // Combine pending, active, and recent jobs for the table
+                let allJobs = [...(data.pending || []), ...(data.active || []), ...(data.recent || [])];
+
+                const tbody = document.getElementById('jobs-table-body');
+                if (!tbody) return;
+                tbody.innerHTML = '';
+
+                const filteredJobs = allJobs.filter(job => {
+                    if (currentFilter === 'all') return true;
+                    if (currentFilter === 'queued') return job.status === 'queued';
+                    if (currentFilter === 'active') return job.status === 'processing' || job.status === 'compressing...' || job.status === 'cancelling...';
+                    if (currentFilter === 'completed') return job.status === 'completed';
+                    if (currentFilter === 'failed') return job.status === 'failed' || job.status === 'cancelled';
+                    return true;
+                });
+
+                if (filteredJobs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" class="py-8 text-center text-slate-400">No jobs found matching the selected filter.</td></tr>`;
+                    return;
+                }
+
+                filteredJobs.forEach(job => {
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-50/60 transition";
+
+                    let statusBadge = '';
+                    if (job.status === 'queued') {
+                        statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200"><i class="fa-regular fa-clock mr-1"></i> Queued</span>`;
+                    } else if (job.status === 'processing' || job.status === 'compressing...' || job.status === 'cancelling...') {
+                        statusBadge = `
+                            <div>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                                    <i class="fa-solid fa-spinner fa-spin mr-1"></i> ${job.status === 'cancelling...' ? 'Cancelling...' : `${job.status} (${job.progress}%)`}
+                                </span>
+                                <div class="w-28 bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
+                                    <div class="bg-blue-600 h-full transition-all duration-300" style="width: ${job.progress}%"></div>
+                                </div>
+                            </div>`;
+                    } else if (job.status === 'completed') {
+                        statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200"><i class="fa-solid fa-circle-check mr-1"></i> Completed</span>`;
+                    } else if (job.status === 'failed') {
+                        statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-50 text-rose-700 border border-rose-200"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Failed</span>`;
+                    } else if (job.status === 'cancelled') {
+                        statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-600 border border-slate-200"><i class="fa-solid fa-ban mr-1"></i> Cancelled</span>`;
+                    } else {
+                        statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">${job.status}</span>`;
+                    }
+
+                    // Action buttons
+                    let actionButton = '';
+                    if (job.status === 'queued' || job.status === 'processing' || job.status === 'compressing...') {
+                        actionButton = `<button onclick="cancelJob('${job.id}')" class="px-2.5 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-600 font-semibold text-[11px] transition shadow-sm"><i class="fa-solid fa-ban mr-1"></i> Cancel</button>`;
+                    } else {
+                        actionButton = `<span class="text-slate-400 text-[11px]">--</span>`;
+                    }
+
+                    tr.innerHTML = `
+                        <td class="py-3.5 px-4">
+                            <div class="font-medium text-slate-900 truncate max-w-[180px] sm:max-w-xs">${job.title}</div>
+                            <div class="flex items-center space-x-2 mt-0.5">
+                                <span class="text-[10px] font-mono px-1.5 py-0.2 rounded border bg-slate-100 text-slate-600">${job.format}</span>
+                                <span class="text-[11px] text-slate-400">${job.size || '--'}</span>
+                            </div>
+                        </td>
+                        <td class="py-3.5 px-4">${statusBadge}</td>
+                        <td class="py-3.5 px-4 font-mono text-[11px] text-slate-500">Kokoro-82M</td>
+                        <td class="py-3.5 px-4 text-slate-600 font-mono text-[11px]">${job.size || '--'}</td>
+                        <td class="py-3.5 px-4 text-right">${actionButton}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+
+            } catch (err) {
+                console.error("Polling error:", err);
+            }
+        }
+
+        // Poll backend every 2 seconds for live updates
+        setInterval(fetchPipelineStatus, 2000);
+        fetchPipelineStatus();
+    </script>
+</body>
+</html>
