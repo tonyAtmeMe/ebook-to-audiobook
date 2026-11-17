@@ -3,6 +3,7 @@
 env/
 venv/
 *.pdf
+*.exe
 # Python Cache
 __pycache__/
 *.py[cod]

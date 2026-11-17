@@ -1,6 +1,10 @@
 # Ebook-to-Audiobook Local Pipeline & Web Dashboard
 
-An automated background service for Windows that monitors an inbox folder, extracts text from multiple e-book formats (`.epub`, `.pdf`, `.docx`, `.txt`), cleans extraneous noise (page numbers, copyright notices, metadata blocks), converts the text to natural speech using **Kokoro-82M**, exports the audio to a cloud folder, and provides a lightweight real-time monitoring web dashboard.
+An automated background service for Windows that monitors an inbox folder, extracts text from multiple e-book formats
+ (`.epub`, .mobi,`.pdf`, `.docx`, `.txt`), cleans extraneous noise 
+ (page numbers, copyright notices, metadata blocks), 
+ converts the text to natural speech using **Kokoro-82M**, 
+ exports the audio to a cloud folder, and provides a lightweight real-time monitoring web dashboard.
 
 ---
 

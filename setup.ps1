@@ -9,6 +9,7 @@ $BinDir = "$InstallDir\bin"
 $InboxDir = "C:\AudiobookInbox"
 $CloudDir = "C:\AudiobookCloud"
 $ArchiveDir = "$InboxDir\archive"
+$ProcessingDir = "$InboxDir\processing"
 $ServiceName = "EbookAudioService"
 
 Write-Host "[*] Provisioning directory structure..." -ForegroundColor Cyan
@@ -17,6 +18,7 @@ New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 New-Item -ItemType Directory -Force -Path $InboxDir | Out-Null
 New-Item -ItemType Directory -Force -Path $CloudDir | Out-Null
 New-Item -ItemType Directory -Force -Path $ArchiveDir | Out-Null
+New-Item -ItemType Directory -Force -Path $ProcessingDir | Out-Null
 
 # 1. Automatically Install Git if missing
 if (!(Get-Command "git" -ErrorAction SilentlyContinue)) {
