@@ -2,7 +2,7 @@
 .venv/
 env/
 venv/
-
+.pdf
 # Python Cache
 __pycache__/
 *.py[cod]
