@@ -2,7 +2,7 @@
 .venv/
 env/
 venv/
-.pdf
+*.pdf
 # Python Cache
 __pycache__/
 *.py[cod]
@@ -11,4 +11,4 @@ __pycache__/
 # Distribution / Packaging
 build/
 dist/
-*.egg-info/
+*.egg-info/*.PDF
