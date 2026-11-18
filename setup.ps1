@@ -110,6 +110,17 @@ foreach ($p in $PathsToAdd) {
 [Environment]::SetEnvironmentVariable("Path", $CurrentMachinePath, "Machine")
 $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
 
+# --- CONFIGURE FIREWALL RULE FOR REMOTE RDP CLIENT ACCESS ---
+Write-Host "[*] Configuring Windows Firewall rule for remote Web Dashboard access (Port 8000)..." -ForegroundColor Cyan
+try {
+    if (!(Get-NetFirewallRule -DisplayName "Ebook Pipeline Dashboard" -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName "Ebook Pipeline Dashboard" -Direction Inbound -Protocol TCP -LocalPort 8000 -Action Allow | Out-Null
+        Write-Host "[+] Firewall rule added successfully." -ForegroundColor Green
+    }
+} catch {
+    Write-Host "[!] Warning: Could not configure firewall rule automatically." -ForegroundColor Yellow
+}
+
 # --- SET STRICT NTFS PERMISSIONS ---
 Write-Host "[*] Configuring NTFS ACL permissions on directories..." -ForegroundColor Cyan
 foreach ($dir in @($InstallDir, $InboxDir, $CloudDir)) {
@@ -156,7 +167,7 @@ if ($NssmExe) {
         Start-Sleep -Seconds 2
     }
 
-    & $NssmExe install $ServiceName $PythonExe "-m uvicorn app:app --host 127.0.0.1 --port 8000"
+    & $NssmExe install $ServiceName $PythonExe "-m uvicorn app:app --host 0.0.0.0 --port 8000"
     & $NssmExe set $ServiceName AppDirectory $InstallDir
     & $NssmExe set $ServiceName AppStdout "$InstallDir\service_out.log"
     & $NssmExe set $ServiceName AppStderr "$InstallDir\service_err.log"
@@ -166,7 +177,7 @@ if ($NssmExe) {
 
     Write-Host "[*] Starting service..." -ForegroundColor Cyan
     & $NssmExe start $ServiceName
-    Write-Host "[+] Installation complete! Dashboard available at http://127.0.0.1:8000" -ForegroundColor Green
+    Write-Host "[+] Installation complete! Dashboard available locally at http://127.0.0.1:8000 or remotely at http://<server-ip>:8000" -ForegroundColor Green
 } else {
     Write-Host "[!] Error: nssm.exe could not be found anywhere inside $InstallDir." -ForegroundColor Red
     exit 1

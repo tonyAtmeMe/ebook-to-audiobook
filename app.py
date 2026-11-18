@@ -62,11 +62,12 @@ OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
 CALIBRE_PATH = r"C:\Program Files\Calibre2\ebook-convert.exe"
 
-# --- WEB DASHBOARD FASTAPI APP (Instantiated early so Uvicorn finds it) ---
+# --- WEB DASHBOARD FASTAPI APP (Instantiated immediately for Uvicorn) ---
 app = FastAPI()
 
-# Global reference for TTS pipeline
+# Global reference for TTS pipeline and status flag
 tts_pipeline = None
+is_model_loading = False
 
 # Shared Thread-Safe Global State for Dashboard
 STATE = {
@@ -166,11 +167,41 @@ class EbookProcessor:
         result_text = re.sub(r'[ \t]+', ' ', result_text)
         return result_text
 
+    @staticmethod
+    def merge_mp3_fragments(fragment_paths: list, output_mp3_path: Path):
+        """Merges multiple MP3 fragment files into a single master MP3 using FFmpeg concat stream-copy."""
+        list_file_path = output_mp3_path.parent / f"{output_mp3_path.stem}_concat_list.txt"
+        try:
+            with open(list_file_path, "w", encoding="utf-8") as f:
+                for frag in fragment_paths:
+                    safe_path = str(frag.resolve()).replace("'", "'\\''")
+                    f.write(f"file '{safe_path}'\n")
+
+            subprocess.run(
+                [
+                    "ffmpeg", "-y", "-f", "concat", "-safe", "0",
+                    "-i", str(list_file_path), "-c", "copy", str(output_mp3_path)
+                ],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            print(f"[*] Successfully merged MP3 fragments into master file: {output_mp3_path.name}")
+        except Exception as e:
+            print(f"[!] Error merging MP3 fragments: {e}")
+            raise e
+        finally:
+            if list_file_path.exists():
+                list_file_path.unlink(missing_ok=True)
+
     @classmethod
     def process_file(cls, job_id: str, original_file_path: Path):
-        global tts_pipeline
-        if tts_pipeline is None:
-            raise RuntimeError("TTS Pipeline is not initialized.")
+        global tts_pipeline, is_model_loading
+        
+        # Wait gracefully if the model is still initializing in the background
+        while is_model_loading or tts_pipeline is None:
+            print("[*] Waiting for Kokoro TTS model to complete initialization...")
+            time.sleep(2.0)
 
         with CANCELLED_LOCK:
             if job_id in CANCELLED_JOBS:
@@ -190,6 +221,7 @@ class EbookProcessor:
             STATE["pending_queue"] = [j for j in STATE["pending_queue"] if j["id"] != job_id]
             STATE["active_queue"].append(job_info)
             
+        fragment_files = []
         try:
             file_path = cls.preprocess_file(original_file_path)
             
@@ -210,51 +242,56 @@ class EbookProcessor:
             if not clean_text.strip():
                 raise ValueError("Extracted text is empty after cleaning.")
 
-            temp_wav = OUTPUT_FOLDER / f"{file_path.stem}_temp.wav"
-            out_file = OUTPUT_FOLDER / f"{file_path.stem}.mp3"
-            
             generator = tts_pipeline(clean_text, voice='af_heart', speed=1.0)
             
             chunk_count = 0
-            with sf.SoundFile(str(temp_wav), mode='w', samplerate=24000, channels=1) as sf_writer:
-                for gs, ps, audio in generator:
-                    with CANCELLED_LOCK:
-                        if job_id in CANCELLED_JOBS:
-                            raise InterruptedError("Job cancelled by user.")
+            for gs, ps, audio in generator:
+                with CANCELLED_LOCK:
+                    if job_id in CANCELLED_JOBS:
+                        raise InterruptedError("Job cancelled by user.")
 
-                    if audio is not None and len(audio) > 0:
-                        if hasattr(audio, "detach"):
-                            audio = audio.detach().cpu().numpy()
-                        elif not isinstance(audio, np.ndarray):
-                            audio = np.array(audio)
-                        
-                        sf_writer.write(audio)
-                        chunk_count += 1
-                        if chunk_count % 20 == 0:
-                            sf_writer.flush()
-                            with STATE_LOCK:
-                                if job_info["progress"] < 80:
-                                    job_info["progress"] = min(80, job_info["progress"] + 1)
+                if audio is not None and len(audio) > 0:
+                    if hasattr(audio, "detach"):
+                        audio = audio.detach().cpu().numpy()
+                    elif not isinstance(audio, np.ndarray):
+                        audio = np.array(audio)
+                    
+                    temp_wav = OUTPUT_FOLDER / f"{file_path.stem}_part_{chunk_count:04d}_temp.wav"
+                    temp_mp3 = OUTPUT_FOLDER / f"{file_path.stem}_part_{chunk_count:04d}.mp3"
+                    
+                    sf.write(str(temp_wav), audio, 24000)
+                    
+                    # Compress chunk immediately to MP3
+                    subprocess.run(
+                        ["ffmpeg", "-y", "-i", str(temp_wav), "-codec:a", "libmp3lame", "-b:a", "192k", str(temp_mp3)],
+                        check=True,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    temp_wav.unlink(missing_ok=True)
+                    
+                    fragment_files.append(temp_mp3)
+                    chunk_count += 1
+                    
+                    with STATE_LOCK:
+                        if job_info["progress"] < 80:
+                            job_info["progress"] = min(80, job_info["progress"] + 1)
                 
             with STATE_LOCK:
                 job_info["progress"] = 85
-                job_info["status"] = "compressing..."
+                job_info["status"] = "merging..."
 
-            print(f"[*] Compressing audio to MP3: {out_file.name}")
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", str(temp_wav), "-codec:a", "libmp3lame", "-b:a", "192k", str(out_file)],
-                    check=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                temp_wav.unlink(missing_ok=True)
-            except Exception as ffmpeg_err:
-                print(f"[!] FFmpeg compression failed ({ffmpeg_err}), falling back to WAV format.")
-                fallback_wav = OUTPUT_FOLDER / f"{file_path.stem}.wav"
-                if temp_wav.exists():
-                    shutil.move(str(temp_wav), str(fallback_wav))
-                out_file = fallback_wav
+            master_mp3 = OUTPUT_FOLDER / f"{file_path.stem}.mp3"
+            if fragment_files:
+                print(f"[*] Merging {len(fragment_files)} MP3 chunks into final audiobook...")
+                cls.merge_mp3_fragments(fragment_files, master_mp3)
+            else:
+                raise ValueError("No audio fragments were generated.")
+
+            # Clean up individual fragments
+            for frag in fragment_files:
+                if frag.exists():
+                    frag.unlink(missing_ok=True)
 
             with STATE_LOCK:
                 job_info["status"] = "completed"
@@ -262,7 +299,7 @@ class EbookProcessor:
                 STATE["total_converted"] += 1
                 STATE["active_queue"] = [j for j in STATE["active_queue"] if j["id"] != job_id]
                 STATE["recent_jobs"].insert(0, job_info)
-            print(f"[*] Successfully completed: {original_file_path.name} -> {out_file.name}")
+            print(f"[*] Successfully completed: {original_file_path.name} -> {master_mp3.name}")
 
             # Archive original file out of staging to archive folder
             try:
@@ -282,9 +319,9 @@ class EbookProcessor:
                 job_info["progress"] = 0
                 STATE["active_queue"] = [j for j in STATE["active_queue"] if j["id"] != job_id]
                 STATE["recent_jobs"].insert(0, job_info)
-            temp_wav = OUTPUT_FOLDER / f"{file_path.stem}_temp.wav"
-            if temp_wav.exists():
-                temp_wav.unlink(missing_ok=True)
+            for frag in fragment_files:
+                if frag.exists():
+                    frag.unlink(missing_ok=True)
         except Exception as e:
             print(f"[!] Error processing {original_file_path.name}: {e}")
             with STATE_LOCK:
@@ -292,6 +329,9 @@ class EbookProcessor:
                 job_info["error"] = str(e)
                 STATE["active_queue"] = [j for j in STATE["active_queue"] if j["id"] != job_id]
                 STATE["recent_jobs"].insert(0, job_info)
+            for frag in fragment_files:
+                if frag.exists():
+                    frag.unlink(missing_ok=True)
         finally:
             with CANCELLED_LOCK:
                 if job_id in CANCELLED_JOBS:
@@ -336,7 +376,6 @@ def poll_inbox_directory():
                         continue
                         
                     if fp.is_file() and fp.suffix.lower() in supported_extensions:
-                        # File stability check (ensures copy is fully complete before processing)
                         try:
                             size1 = fp.stat().st_size
                             time.sleep(0.3)
@@ -384,22 +423,31 @@ def poll_inbox_directory():
         
         time.sleep(3.0)
 
-@app.on_event("startup")
-def startup_event():
-    global tts_pipeline
-    print("[*] Initializing Kokoro TTS Pipeline during application startup...")
+def initialize_model_in_background():
+    """Asynchronously loads the Kokoro TTS Pipeline to keep dashboard HTTP server instantaneous."""
+    global tts_pipeline, is_model_loading
+    is_model_loading = True
+    print("[*] Asynchronously loading Kokoro TTS Model weights in background thread...")
     try:
         tts_pipeline = KPipeline(lang_code='a')
-        print("[+] Kokoro TTS Pipeline initialized successfully.")
+        print("[+] Kokoro TTS Pipeline loaded and ready for synthesis.")
     except Exception as e:
-        print(f"[!] Critical Error initializing Kokoro TTS Pipeline: {e}")
+        print(f"[!] Error initializing Kokoro TTS Pipeline: {e}")
+    finally:
+        is_model_loading = False
+
+@app.on_event("startup")
+def startup_event():
+    # Spawn model initialization in an asynchronous background thread
+    model_thread = threading.Thread(target=initialize_model_in_background, daemon=True)
+    model_thread.start()
 
     worker_thread = threading.Thread(target=background_worker, daemon=True)
     worker_thread.start()
 
     poller_thread = threading.Thread(target=poll_inbox_directory, daemon=True)
     poller_thread.start()
-    print("[*] Background worker and inbox polling scanner started successfully.")
+    print("[*] Dashboard API instantly available. Background workers initialized.")
 
 @app.get("/api/status")
 def get_status():
@@ -407,6 +455,7 @@ def get_status():
     with STATE_LOCK:
         return JSONResponse({
             "is_paused": STATE["is_paused"],
+            "model_ready": tts_pipeline is not None,
             "total_converted": STATE["total_converted"],
             "inbox_path": str(INBOX_FOLDER),
             "pending": STATE["pending_queue"],
@@ -445,4 +494,5 @@ def index():
     return "<h3>Dashboard HTML file not found. Make sure audiobook_pipeline_dashboard.html is placed in C:\\EbookAutomation</h3>"
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=False)
+    # Host bound to 0.0.0.0 so web interface is accessible locally and across RDP sessions
+    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=False)
